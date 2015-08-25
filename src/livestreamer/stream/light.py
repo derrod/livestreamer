@@ -1,4 +1,5 @@
 import websocket
+import json
 
 from .stream import Stream
 from .wrappers import StreamIOIterWrapper
@@ -16,27 +17,37 @@ class LightStream(Stream):
 
     __shortname__ = "light"
 
-    # {"State":"ACTIVE"} with 0x00 inbetween for some reason...
-    handshake_ok = b'{\x00"\x00S\x00t\x00a\x00t\x00e\x00"\x00:\x00"\x00A\x00C\x00T\x00I\x00V\x00E\x00"\x00}\x00'
+    def __init__(self, session, url):
+        Stream.__init__(self, session)
 
-    def __init__(self, session_, url):
-        Stream.__init__(self, session_)
-
+        self.logger = session.logger.new_module("stream.light")
         self.url = url
 
     def __repr__(self):
         return "<LightStream({0!r})>".format(self.url)
 
     def open(self):
-        timeout = self.session.options.get("http-timeout")  # we use this for the time being
+        timeout = self.session.options.get("http-timeout")
 
         try:
+            self.logger.debug("Creating websocket connection... Timeout: {}".format(timeout))
             ws = websocket.create_connection(self.url, timeout)
+            self.logger.debug("Getting 'State' Frame...")
             first_frame = ws.recv()
-            if first_frame != self.handshake_ok:
+            first_frame_data = json.loads(first_frame.replace(b"\x00", b"").decode("utf-8"))
+            self.logger.debug("State: '{}'".format(first_frame_data['State']))
+
+            # Check if state is a known one that works (i.e. stream will start)
+            if first_frame_data['State'] in ['READ_BODY', 'ACTIVE', 'IDLE']:
+                self.logger.debug("This looks ok I guess... Go!")
+            else:
+                self.logger.error("Invalid State: '{}'".format(first_frame_data['State']))
                 raise StreamError
-        except websocket.WebSocketException:
+        except websocket.WebSocketException as e:
+            self.logger.error("WebSocketException: '{}'".format(e))
             raise StreamError
+
+        self.logger.debug("Starting streaming using websockets...")
 
         fd = StreamIOIterWrapper(ws)
 
