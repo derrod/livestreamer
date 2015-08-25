@@ -2,38 +2,13 @@ import re
 
 from livestreamer.plugin import Plugin
 from livestreamer.plugin.api import http, validate
-from livestreamer.stream import RTMPStream
+from livestreamer.stream import LightStream
 
 _url_re = re.compile("http(s)?://(\w+.)?beam.pro/(?P<channel>[^/]+)")
 
 CHANNEL_INFO = "https://beam.pro/api/v1/channels/{0}"
-CHANNEL_MANIFEST = "https://beam.pro/api/v1/channels/{0}/manifest.smil"
+CHANNEL_MANIFEST = "https://beam.pro/api/v1/channels/{0}/manifest.light"
 
-_assets_schema = validate.Schema(
-    validate.union({
-        "base": validate.all(
-            validate.xml_find("./head/meta"),
-            validate.get("base"),
-            validate.url(scheme="rtmp")
-        ),
-        "videos": validate.all(
-            validate.xml_findall(".//video"),
-            [
-                validate.union({
-                    "src": validate.all(
-                        validate.get("src"),
-                        validate.text
-                    ),
-                    "height": validate.all(
-                        validate.get("height"),
-                        validate.text,
-                        validate.transform(int)
-                    )
-                })
-            ]
-        )
-    })
-)
 
 class Beam(Plugin):
     @classmethod
@@ -50,13 +25,11 @@ class Beam(Plugin):
             return
 
         res = http.get(CHANNEL_MANIFEST.format(channel_info["id"]))
-        assets = http.xml(res, schema=_assets_schema)
+        assets = http.json(res)
         streams = {}
-        for video in assets["videos"]:
+        for video in assets["resolutions"]:
             name = "{0}p".format(video["height"])
-            stream = RTMPStream(self.session,{
-                "rtmp"     : "{0}/{1}".format(assets["base"], video["src"])
-            })
+            stream = LightStream(self.session, video["url"])
             streams[name] = stream
 
         return streams
